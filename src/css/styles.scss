@@ -1,0 +1,19 @@
+html {
+    width: 100%;
+    height: 100%;
+}
+table {
+  border-collapse: collapse;
+}
+
+tr.dep-env {
+  background-color: silver;
+}
+
+tr.dep-main {
+  border: 1px black;
+}
+
+td {
+  text-align: center
+}
