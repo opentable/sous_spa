@@ -1,6 +1,7 @@
 html {
     width: 100%;
     height: 100%;
+    background-color: #666;
 }
 table {
   border-collapse: collapse;
@@ -16,4 +17,19 @@ tr.dep-main {
 
 td {
   text-align: center
+}
+
+.sous-status {
+  .service {
+    border: 1px solid black;
+    border-radius: .7em;
+    margin: 0.5em;
+    padding: 0.5em;
+    background-color: #888;
+    .cluster {
+      background-color: #aaa;
+      margin: 0.5em;
+      padding: 0.5em;
+    }
+  }
 }

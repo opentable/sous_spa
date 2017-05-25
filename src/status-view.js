@@ -204,7 +204,7 @@ function model(sources) {
 function view(state) {
   //return xs.combine(state.statuses$)
   return state.statuses$
-  .map((serviceList) => div( serviceList.map(serviceView)));
+  .map((serviceList) => div('.sous-status', serviceList.map(serviceView)));
   /*
   return xs.combine(state.gdm$, state.filters)
   .filter(([j, filters]) => filters != undefined)
@@ -218,20 +218,20 @@ function view(state) {
 }
 
 function serviceView(service) {
-  return div([
+  return div(".service", [
       h1(service.location),
       div(service.clusters.map(clusterView))
     ]);
 }
 
 function clusterView(cluster) {
-  return div([
+  return div(".cluster", [
       h2(cluster.cluster),
-      div([
+      div(".requested", [
           span("Requested"),
           span([cluster.current.version]),
         ]),
-      div([
+      div(".deployed", [
           "Deployed",
           span([cluster.completed.version]),
           span([cluster.completed.outcome]),
