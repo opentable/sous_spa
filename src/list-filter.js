@@ -1,5 +1,6 @@
 import {div, ol, li, form, input} from '@cycle/dom'
 import xs from 'xstream'
+import isolate from '@cycle/isolate'
 
 export function ListFilterDemo(sources) {
   let listFilter = ListFilter({
@@ -50,4 +51,42 @@ export function ListFilter(sources) {
     DOM: view(),
     list$: model(ffn, intent(sources.DOM), list$),
   }
+}
+
+
+/*
+ * ListFilters(list, sourceDOM,
+ * [ "cluster", ff(d=>d["ClusterName"])],
+ * [ "location", ff(d => d["SourceID"]["Location"])]
+ * )
+ */
+
+export function ListFilters(list, sourcesDOM, ...filterDesc) {
+  let filtering = filterDesc.reduce(
+    (filtered, [name, ff]) => {
+      let filter = isolate(ListFilter, name)({
+          list$: filtered.list,
+          DOM: sourcesDOM,
+          filterFactory: ff,
+        });
+      return {
+        list: filter.list$,
+        doms: filtered.doms.concat(filter.DOM),
+      };
+    }, {list: list, doms: []});
+
+
+  let filter$ = xs.combine(...filtering.doms)
+  .map( doms => {
+      return doms.reduce((domObj, dom, idx) => {
+          let [name, _] = filterDesc[idx];
+          domObj[name] = dom;
+          return domObj;
+        }, {});
+    });
+
+  return {
+    list$: filtering.list,
+    doms: filter$,
+  };
 }

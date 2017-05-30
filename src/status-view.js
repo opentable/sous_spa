@@ -1,14 +1,26 @@
 import {div, h1, h2, span} from '@cycle/dom'
 import isolate from '@cycle/isolate'
 import xs from 'xstream'
-import {ListFilter} from './list-filter'
+import flattenConcurrently from 'xstream/extra/flattenConcurrently'
+import {ListFilters} from './list-filter'
 
 export function StatusView (sources) {
+  let statuses$ = model({
+      DOM: sources.DOM,
+      network: network(sources.HTTP),
+    });
+
+  let ff = sel => text => dep => sel(dep).toLowerCase().includes(text);
+
+  let filtered = ListFilters(statuses$.statuses$, sources.DOM,
+    [ "service", ff(s => s["location"]) ]
+  );
+
   return {
-    DOM: view(model({
-          DOM: sources.DOM,
-          network: network(sources.HTTP),
-        })),
+    DOM: view({
+        statuses$: filtered.list$,
+        filterDOMs: filtered.doms,
+      }),
     HTTP: queries(sources.HTTP)
   };
 }
@@ -52,8 +64,7 @@ function network(httpSource) {
 
   let reports$ = httpSource
   .select("status")
-  .fold((all$, rep$) => xs.merge(all$, rep$), xs.empty())
-  .flatten();
+  .compose(flattenConcurrently);
 
   return xs.combine(srv$, reports$)
   .fold((status, [srvrs, report]) => {
@@ -75,7 +86,8 @@ function network(httpSource) {
 
       status[name] = report.body;
       return status;
-    }, {});
+    }, {})
+  .debug(s => console.log(s));
 }
 
 function getService(services, loc) {
@@ -167,34 +179,6 @@ function model(sources) {
       }
       return ss;
     });
-  /*
-  .map(res => res.body["Deployments"]);
-
-  let ff = sel => text => dep => sel(dep).toLowerCase().includes(text);
-
-  let clusterFilter = isolate(ListFilter, "cluster")({
-      list$: gdm,
-      DOM: sources.DOM,
-      filterFactory: ff(d => d["ClusterName"])
-    })
-
-  let locationFilter = isolate(ListFilter, "location")({
-      list$: clusterFilter.list$,
-      DOM: sources.DOM,
-      filterFactory: ff(d => d["SourceID"]["Location"])
-    })
-
-  let filters$ = xs.combine(clusterFilter.DOM, locationFilter.DOM)
-  .map( ([cluster, location]) => {
-      return { cluster, location };
-    }
-  );
-
-  return {
-    gdm$: locationFilter.list$,
-    filters: filters$
-  }
-  */
 
   return {
     statuses$
@@ -202,36 +186,32 @@ function model(sources) {
 }
 
 function view(state) {
-  //return xs.combine(state.statuses$)
-  return state.statuses$
-  .map((serviceList) => div('.sous-status', serviceList.map(serviceView)));
-  /*
-  return xs.combine(state.gdm$, state.filters)
-  .filter(([j, filters]) => filters != undefined)
-  .map(([json, filters]) =>
-    div([
-      div('Sous Statuses'),
-      statusTable(json, filters)
-    ])
-  );
-  */
+  return xs.combine(state.statuses$, state.filterDOMs)
+  .debug(a => console.log(a))
+  .map(([serviceList,filters]) => {
+      console.log(filters);
+      return div([
+          div( filters.service ),
+          div( serviceList.map(serviceView) )
+        ])
+    });
 }
 
 function serviceView(service) {
-  return div(".service", [
+  return div([
       h1(service.location),
       div(service.clusters.map(clusterView))
     ]);
 }
 
 function clusterView(cluster) {
-  return div(".cluster", [
+  return div([
       h2(cluster.cluster),
-      div(".requested", [
+      div([
           span("Requested"),
           span([cluster.current.version]),
         ]),
-      div(".deployed", [
+      div([
           "Deployed",
           span([cluster.completed.version]),
           span([cluster.completed.outcome]),
