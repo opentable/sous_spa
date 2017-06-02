@@ -1,4 +1,4 @@
-import {div, h1, h2, span} from '@cycle/dom'
+import {div, h1, h2, span, dl, dd, dt} from '@cycle/dom'
 import isolate from '@cycle/isolate'
 import xs from 'xstream'
 import flattenConcurrently from 'xstream/extra/flattenConcurrently'
@@ -38,6 +38,10 @@ function queries(http) {
   });
 
   let statuses$ = http.select("servers")
+  .map((response$) => response$.replaceError((err) => {
+        console.log(err);
+        return xs.empty();
+      }))
   .flatten()
   .map(res => res.body)
   .startWith({"Servers": []})
@@ -47,7 +51,8 @@ function queries(http) {
       for (let server of servers["Servers"]) {
         statuses.push(polling(5000, {
             url: server["URL"] + "/status",
-            category: "status"
+            category: "status",
+            serverName: server["ClusterName"],
           }));
       }
       return xs.merge(...statuses)
@@ -64,6 +69,10 @@ function network(httpSource) {
 
   let reports$ = httpSource
   .select("status")
+  .map((response$) => response$.replaceError((err) => {
+        console.log(err);
+        return xs.empty();
+      }))
   .compose(flattenConcurrently);
 
   return xs.combine(srv$, reports$)
@@ -71,18 +80,7 @@ function network(httpSource) {
       if (!srvrs) {
         return status;
       }
-      let name = null;
-
-      for (let srvr of srvrs) {
-        if (report.req.url.includes(srvr["URL"])) {
-          name = srvr["ClusterName"];
-          break;
-        }
-      }
-
-      if (name == null) {
-        return status;
-      }
+      let name = report.request.serverName;
 
       status[name] = report.body;
       return status;
@@ -161,6 +159,7 @@ function model(sources) {
 
           report.current = {
             version: dep["SourceID"]["Version"],
+            instances: dep["NumInstances"],
             env: dep["Env"],
             resources: dep["Resources"],
           }
@@ -189,33 +188,35 @@ function view(state) {
   return xs.combine(state.statuses$, state.filterDOMs)
   .debug(a => console.log(a))
   .map(([serviceList,filters]) => {
-      console.log(filters);
-      return div([
-          div( filters.service ),
+      return div(".sous-status", [
+          div(".filters", [dl([dt("Service"), dd(filters.service)] )]),
           div( serviceList.map(serviceView) )
         ])
     });
 }
 
 function serviceView(service) {
-  return div([
+  return div(".service", {key: service.location}, [
       h1(service.location),
-      div(service.clusters.map(clusterView))
+      div(".clusters", service.clusters.map(clusterView))
     ]);
 }
 
 function clusterView(cluster) {
-  return div([
+  return div(".cluster", [
       h2(cluster.cluster),
-      div([
-          span("Requested"),
-          span([cluster.current.version]),
-        ]),
-      div([
-          "Deployed",
-          span([cluster.completed.version]),
-          span([cluster.completed.outcome]),
-          span([cluster.completed.error]),
+      div(".reports", [
+          div(".report.requested", [
+              span("Requested"),
+              span([cluster.current.version]),
+              span([cluster.current.instances]),
+            ]),
+          div(".report.deployed", [
+              span("Deployed"),
+              span([cluster.completed.version]),
+              span([cluster.completed.outcome]),
+              span([cluster.completed.error]),
+            ])
         ])
     ]);
 }
