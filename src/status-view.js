@@ -64,6 +64,10 @@ function queries(http) {
 
 function network(httpSource) {
   let srv$ = httpSource.select("servers")
+  .map((response$) => response$.replaceError((err) => {
+        console.log(err);
+        return xs.empty();
+      }))
   .flatten()
   .map(srvr => srvr.body["Servers"]);
 
@@ -99,7 +103,12 @@ function getService(services, loc) {
 }
 
 function getCluster(service, name) {
-  let cluster = {cluster: name};
+  let cluster = {
+    cluster: name,
+    current: {},
+    inprogress: {},
+    completed: {}
+  };
   if (service.clusters.hasOwnProperty(name)) {
     cluster = service.clusters[name];
   } else {
@@ -119,51 +128,66 @@ function serviceName(dep) {
   }
 }
 
+function extractResolveLog(clusterStatus, services, from, to) {
+  for (let dep of clusterStatus[from]["Intended"]) {
+    let loc = serviceName(dep);
+    let service = getService(services, loc);
+    let report = getCluster(service, name);
+
+    service.owners = dep["Owners"];
+    service.flavor = dep["Flavor"];
+
+    report[to] = {
+      version: dep["SourceID"]["Version"],
+      env: dep["Env"],
+      resources: dep["Resources"],
+    }
+  }
+  for (let log of clusterStatus[from]["Log"]) {
+    let loc = log["ManifestID"]
+    let service = getService(services, loc);
+    let report = getCluster(service, name);
+
+    report[to] = {
+      outcome: log["Desc"],
+      error: log["Error"],
+    }
+  }
+}
+
+
+function extractDepState(clusterStatus, services) {
+  for (let dep of clusterStatus["Deployments"]) {
+    let loc = serviceName(dep);
+    let service = getService(services, loc);
+    let report = getCluster(service, name);
+
+    service.owners = dep["Owners"];
+    service.flavor = dep["Flavor"];
+
+    report.current = {
+      version: dep["SourceID"]["Version"],
+      instances: dep["NumInstances"],
+      env: dep["Env"],
+      resources: dep["Resources"],
+    }
+  }
+}
+
+function interpret(services) {
+
+}
+
 function model(sources) {
   let statuses$ = sources.network
   .map(status => {
       let services = { };
       for (let name in status) {
         let clusterStatus = status[name];
-        for (let dep of clusterStatus["Completed"]["Intended"]) {
-          let loc = serviceName(dep);
-          let service = getService(services, loc);
-          let report = getCluster(service, name);
-
-          service.owners = dep["Owners"];
-          service.flavor = dep["Flavor"];
-
-          report.completed = {
-            version: dep["SourceID"]["Version"],
-            env: dep["Env"],
-            resources: dep["Resources"],
-          }
-        }
-        for (let log of clusterStatus["Completed"]["Log"]) {
-          let loc = log["ManifestID"]
-          let service = getService(services, loc);
-          let report = getCluster(service, name);
-
-          report.completed = {
-            outcome: log["Desc"],
-            error: log["Error"],
-          }
-        }
-        for (let dep of clusterStatus["Deployments"]) {
-          let loc = serviceName(dep);
-          let service = getService(services, loc);
-          let report = getCluster(service, name);
-
-          service.owners = dep["Owners"];
-          service.flavor = dep["Flavor"];
-
-          report.current = {
-            version: dep["SourceID"]["Version"],
-            instances: dep["NumInstances"],
-            env: dep["Env"],
-            resources: dep["Resources"],
-          }
-        }
+        extractResolveLog(clusterStatus, services, "Completed", "completed")
+        extractResolveLog(clusterStatus, services, "InProgress", "inprogress")
+        extractDepState(clusterStatus, services)
+        interpret(services)
       }
 
       let ss = [];
