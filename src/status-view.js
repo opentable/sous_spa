@@ -175,7 +175,44 @@ function extractDepState(clusterStatus, services) {
 }
 
 function interpret(services) {
+  for (let service of services) {
+    for (let cluster of cluster.clusters) {
+      let resolve = cluster.completed
+      if cluster.inprogress && cluster.inprogress.outcome {
+        resolve = cluster.inprogress
+      }
 
+      if resolve.outcome === "unchanged" {
+        cluster.interpretation = {
+          status: "Stable",
+          version: cluster.current.version,
+        }
+      } else if resolve.outcome === "coming" {
+        cluster.interpretation = {
+          status: "Pending",
+          version: cluster.current.version,
+        }
+      } else if resolve.outcome === "created" {
+        cluster.interpretation = {
+          status: "Creating",
+          version: cluster.current.version,
+        }
+      } else if resolve.outcome === "deleted" {
+        cluster.interpretation = {
+          status: "Deleting",
+          version: cluster.current.version,
+        }
+      } else if resolve.outcome === "updated" {
+        cluster.interpretation = {
+          status: "Deploying",
+          versions:  {
+            from: resolve.version,
+            to: cluster.current.version,
+          }
+        }
+      }
+    }
+  }
 }
 
 function model(sources) {
