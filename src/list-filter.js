@@ -65,9 +65,9 @@ export function ListFilters(list, sourcesDOM, ...filterDesc) {
   let filtering = filterDesc.reduce(
     (filtered, [name, ff]) => {
       let filter = isolate(ListFilter, name)({
+          filterFactory: ff,
           list$: filtered.list,
           DOM: sourcesDOM,
-          filterFactory: ff,
         });
       return {
         list: filter.list$,

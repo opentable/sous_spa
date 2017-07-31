@@ -31,18 +31,23 @@ function polling(interval, req) {
   .startWith(req);
 }
 
+function selectPolling(http, group) {
+  return http.select(group)
+  .map((response$) => response$.replaceError((err) => {
+        console.log(group, err);
+        return xs.empty();
+      }))
+  .compose(flattenConcurrently)
+}
+
 function queries(http) {
   let servers$ = polling(5000, {
     url: 'http://sous.otenv.com/servers',
     category: "servers",
   });
 
-  let statuses$ = http.select("servers")
-  .map((response$) => response$.replaceError((err) => {
-        console.log(err);
-        return xs.empty();
-      }))
-  .flatten()
+
+  let statuses$ = selectPolling(http, "servers")
   .map(res => res.body)
   .startWith({"Servers": []})
   .filter(servers => servers)
@@ -63,21 +68,10 @@ function queries(http) {
 }
 
 function network(httpSource) {
-  let srv$ = httpSource.select("servers")
-  .map((response$) => response$.replaceError((err) => {
-        console.log(err);
-        return xs.empty();
-      }))
-  .flatten()
+  let srv$ = selectPolling(httpSource, "servers")
   .map(srvr => srvr.body["Servers"]);
 
-  let reports$ = httpSource
-  .select("status")
-  .map((response$) => response$.replaceError((err) => {
-        console.log(err);
-        return xs.empty();
-      }))
-  .compose(flattenConcurrently);
+  let reports$ = selectPolling(httpSource, "status")
 
   return xs.combine(srv$, reports$)
   .fold((status, [srvrs, report]) => {
@@ -129,10 +123,20 @@ function serviceName(dep) {
 }
 
 function extractResolveLog(clusterStatus, services, from, to) {
-  for (let dep of clusterStatus[from]["Intended"]) {
+  let fromStatus = {};
+  if (clusterStatus[from] !== null) {
+    fromStatus = clusterStatus[from];
+  }
+
+  let intended = [];
+  if (fromStatus["Intended"] != null) {
+    intended = fromStatus["Intended"];
+  }
+
+  for (let dep of intended) {
     let loc = serviceName(dep);
     let service = getService(services, loc);
-    let report = getCluster(service, name);
+    let report = getCluster(service, dep.ClusterName);
 
     service.owners = dep["Owners"];
     service.flavor = dep["Flavor"];
@@ -143,10 +147,16 @@ function extractResolveLog(clusterStatus, services, from, to) {
       resources: dep["Resources"],
     }
   }
-  for (let log of clusterStatus[from]["Log"]) {
+
+  let logs = [];
+  if (fromStatus["Log"] != null) {
+    logs = fromStatus["Log"];
+  }
+
+  for (let log of logs) {
     let loc = log["ManifestID"]
     let service = getService(services, loc);
-    let report = getCluster(service, name);
+    let report = getCluster(service, log.Cluster);
 
     report[to] = {
       outcome: log["Desc"],
@@ -157,10 +167,14 @@ function extractResolveLog(clusterStatus, services, from, to) {
 
 
 function extractDepState(clusterStatus, services) {
-  for (let dep of clusterStatus["Deployments"]) {
+  let deps = [];
+  if (clusterStatus["Deployments"] != null) {
+    deps = clusterStatus["Deployments"];
+  }
+  for (let dep of deps) {
     let loc = serviceName(dep);
     let service = getService(services, loc);
-    let report = getCluster(service, name);
+    let report = getCluster(service, dep.ClusterName);
 
     service.owners = dep["Owners"];
     service.flavor = dep["Flavor"];
@@ -175,40 +189,63 @@ function extractDepState(clusterStatus, services) {
 }
 
 function interpret(services) {
-  for (let service of services) {
-    for (let cluster of cluster.clusters) {
-      let resolve = cluster.completed
-      if cluster.inprogress && cluster.inprogress.outcome {
+  for (let name in services) {
+    let service = services[name]
+    for (let cname in service.clusters) {
+      let cluster = service.clusters[cname]
+      let resolve = cluster.completed;
+      if (cluster.inprogress && cluster.inprogress.outcome) {
         resolve = cluster.inprogress
       }
 
-      if resolve.outcome === "unchanged" {
+      cluster.interpretation = {
+        status: "Unknown",
+        error: { "String": "No resolution found" },
+        version: "",
+        resolve: resolve,
+      }
+
+      if (/unchanged/.exec(resolve.outcome)) {
         cluster.interpretation = {
           status: "Stable",
+          error: resolve.error,
           version: cluster.current.version,
+          resolve: resolve,
         }
-      } else if resolve.outcome === "coming" {
+      } else if (/coming/.exec(resolve.outcome)) {
         cluster.interpretation = {
           status: "Pending",
+          error: resolve.error,
           version: cluster.current.version,
+          resolve: resolve,
         }
-      } else if resolve.outcome === "created" {
+      } else if (/created/.exec(resolve.outcome)) {
         cluster.interpretation = {
           status: "Creating",
+          error: resolve.error,
           version: cluster.current.version,
+          resolve: resolve,
         }
-      } else if resolve.outcome === "deleted" {
+      } else if (/deleted/.exec(resolve.outcome)) {
         cluster.interpretation = {
           status: "Deleting",
+          error: resolve.error,
           version: cluster.current.version,
+          resolve: resolve,
         }
-      } else if resolve.outcome === "updated" {
+      } else if (/updated/.exec(resolve.outcome)) {
         cluster.interpretation = {
           status: "Deploying",
+          error: resolve.error,
+          resolve: resolve,
           versions:  {
             from: resolve.version,
             to: cluster.current.version,
           }
+        }
+      } else {
+        if (resolve.error != null) {
+          cluster.interpretation.error = resolve.error
         }
       }
     }
@@ -224,8 +261,8 @@ function model(sources) {
         extractResolveLog(clusterStatus, services, "Completed", "completed")
         extractResolveLog(clusterStatus, services, "InProgress", "inprogress")
         extractDepState(clusterStatus, services)
-        interpret(services)
       }
+      interpret(services)
 
       let ss = [];
       for (let name in services) {
@@ -266,35 +303,57 @@ function serviceView(service) {
 function clusterView(cluster) {
   return div(".cluster", [
       h2(cluster.cluster),
-      div(".reports", [
-          div(".report.requested", [
-              span("Requested"),
-              span([cluster.current.version]),
-              span([cluster.current.instances]),
-            ]),
-          div(".report.deployed", [
-              span("Deployed"),
-              span([cluster.completed.version]),
-              span([cluster.completed.outcome]),
-              span([cluster.completed.error]),
-            ])
-        ])
+      div(".reports",
+        reportView(cluster)
+      )
     ]);
 }
 
-function compareDeps(left, right) {
-  if(left["ClusterName"] < right["ClusterName"]) {
-    return -1
+function reportView(cluster) {
+  if (cluster.interpretation.error != null) {
+    return div(reportClass(cluster),[
+        span(".state", "Error while " + cluster.interpretation.status + " " + cluster.interpretation.error.String),
+        span(".intent", "Intended version: " + cluster.current.version +" instances: "+cluster.current.instances)
+      ])
   }
-  if(left["ClusterName"] > right["ClusterName"]) {
-    return 1
+  if (cluster.interpretation.status == "Deploying") {
+    return [div(".report.deploy", [
+          span(".state", "Deploying: from " + cluster.interpretation.versions.from +
+              " to " + cluster.interpretation.versions.to)
+          ])];
+    }
+    return [
+      div(reportClass(cluster),[
+          span(".state", cluster.interpretation.status + ": " + cluster.interpretation.version),
+          span(".intent", "Instances: "+cluster.current.instances)
+        ])
+    ];
   }
 
-  if (left["SourceID"]["Location"] < right["SourceID"]["Location"]){
-    return -1
+  function reportClass(cluster) {
+    let string = ".report." + cluster.interpretation.status.toLowerCase()
+    if (cluster.interpretation.error != null) {
+      string += ".error"
+    }
+    if (cluster.current.version == "0.0.0" && cluster.current.instances == 1) {
+      string += ".unhelpful-settings" //0.0.0 + >0 intances hammers the docker repo
+    }
+    return string
   }
-  if (left["SourceID"]["Location"] > right["SourceID"]["Location"]){
-    return 1
+
+  function compareDeps(left, right) {
+    if(left["ClusterName"] < right["ClusterName"]) {
+      return -1
+    }
+    if(left["ClusterName"] > right["ClusterName"]) {
+      return 1
+    }
+
+    if (left["SourceID"]["Location"] < right["SourceID"]["Location"]){
+      return -1
+    }
+    if (left["SourceID"]["Location"] > right["SourceID"]["Location"]){
+      return 1
+    }
+    return 0
   }
-  return 0
-}
