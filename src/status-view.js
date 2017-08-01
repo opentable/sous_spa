@@ -312,48 +312,47 @@ function clusterView(cluster) {
 function reportView(cluster) {
   if (cluster.interpretation.error != null) {
     return div(reportClass(cluster),[
-        span(".state", "Error while " + cluster.interpretation.status + " " + cluster.interpretation.error.String),
+        span(".state", "Error while " + cluster.interpretation.status + " " + cluster.interpretation.error.String.slice(0, 220)),
         span(".intent", "Intended version: " + cluster.current.version +" instances: "+cluster.current.instances)
       ])
   }
   if (cluster.interpretation.status == "Deploying") {
     return [div(".report.deploy", [
-          span(".state", "Deploying: from " + cluster.interpretation.versions.from +
-              " to " + cluster.interpretation.versions.to)
-          ])];
-    }
-    return [
-      div(reportClass(cluster),[
-          span(".state", cluster.interpretation.status + ": " + cluster.interpretation.version),
-          span(".intent", "Instances: "+cluster.current.instances)
-        ])
-    ];
+          span(".state", "Deploying: from " + cluster.interpretation.versions.from + " to " + cluster.interpretation.versions.to)
+        ])];
+  }
+  return [
+    div(reportClass(cluster),[
+        span(".state", cluster.interpretation.status + ": " + cluster.interpretation.version),
+        span(".intent", "Instances: "+cluster.current.instances)
+      ])
+  ];
+}
+
+function reportClass(cluster) {
+  let string = ".report." + cluster.interpretation.status.toLowerCase()
+  if (cluster.interpretation.error != null) {
+    string += ".error"
+  }
+  if (cluster.current.version == "0.0.0" && cluster.current.instances == 1) {
+    string += ".unhelpful-settings" //0.0.0 + >0 intances hammers the docker repo
+  }
+  return string
+}
+
+function compareDeps(left, right) {
+  if(left["ClusterName"] < right["ClusterName"]) {
+    return -1
+  }
+  if(left["ClusterName"] > right["ClusterName"]) {
+    return 1
   }
 
-  function reportClass(cluster) {
-    let string = ".report." + cluster.interpretation.status.toLowerCase()
-    if (cluster.interpretation.error != null) {
-      string += ".error"
-    }
-    if (cluster.current.version == "0.0.0" && cluster.current.instances == 1) {
-      string += ".unhelpful-settings" //0.0.0 + >0 intances hammers the docker repo
-    }
-    return string
+  if (left["SourceID"]["Location"] < right["SourceID"]["Location"]){
+    return -1
   }
-
-  function compareDeps(left, right) {
-    if(left["ClusterName"] < right["ClusterName"]) {
-      return -1
-    }
-    if(left["ClusterName"] > right["ClusterName"]) {
-      return 1
-    }
-
-    if (left["SourceID"]["Location"] < right["SourceID"]["Location"]){
-      return -1
-    }
-    if (left["SourceID"]["Location"] > right["SourceID"]["Location"]){
-      return 1
-    }
-    return 0
+  if (left["SourceID"]["Location"] > right["SourceID"]["Location"]){
+    return 1
   }
+  return 0
+}
